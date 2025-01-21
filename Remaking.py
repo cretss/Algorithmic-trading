@@ -8,7 +8,7 @@ import datetime as dt
 import yfinance as yf
 import warnings
 import pandas_ta 
-from sklearn.cluster import k_means
+from sklearn.cluster import KMeans
 
 warnings.filterwarnings('ignore') #ignorar os erros
 
@@ -27,8 +27,6 @@ start_date = pd.to_datetime(end_date)-pd.DateOffset(365*8)
 print(start_date)
 
 df=yf.download(tickers=symbols_list,start=start_date,end=end_date).stack() #e necessario stackar o multiindex
-
-df.index.names = ['date', 'ticker']
 
 df.columns
 
@@ -69,12 +67,12 @@ df['dollar_volume'] = (df['Adj Close']*df['Volume'])/1e6
 
 last_columns=[c for c in df.columns.unique(0) if c not in ['dollar_volume','Close','Open','High','Low','Volume']]
 
-data = pd.concat([df.unstack('ticker')['dollar_volume'].resample('M').mean().stack('Ticker').to_frame('dollar_volume'),
-                df.unstack('ticker')[last_columns].resample('M').mean().stack('Ticker')],axis=1).dropna()
+data = pd.concat([df.unstack('Ticker')['dollar_volume'].resample('M').mean().stack('Ticker').to_frame('dollar_volume'),
+                df.unstack('Ticker')[last_columns].resample('M').mean().stack('Ticker')],axis=1).dropna()
 
 print(data)
 
-data['dollar_volume']=(data.loc[:,'dollar_volume'].unstack('ticker').rolling(5*12).mean().stack()) #trabalhando apenas com dollar volume
+data['dollar_volume']=(data.loc[:,'dollar_volume'].unstack('Ticker').rolling(5*12).mean().stack()) #trabalhando apenas com dollar volume
 
 data['dollar_volume_rank'] = (data.groupby('Date')['dollar_volume'].rank(ascending=False))
 
@@ -129,7 +127,7 @@ observations = factor_data.groupby(level=1).size()
 
 valid_stocks = observations[observations >= 10] #filtro de stocks com mais de 10 meses de dados
 
-factor_data = factor_data[factor_data.index.get_level_values('ticker').isin(valid_stocks.index)]
+factor_data = factor_data[factor_data.index.get_level_values('Ticker').isin(valid_stocks.index)]
 
 betas =(factor_data.groupby(level = 1,group_keys=False)
 .apply(lambda x : RollingOLS(endog=x['return_1m'],exog=sm.add_constant(x.drop('return_1m',axis=1)),window=min(24,x.shape[0]),min_nobs=(len(x.columns)+1))
@@ -139,22 +137,28 @@ betas =(factor_data.groupby(level = 1,group_keys=False)
 
 print(betas)
 
-data = data.join(betas.groupby('ticker').shift())
+data = data.join(betas.groupby('Ticker').shift())
 
 factors = ['Mkt-RF','SMB','HML','RMW','CMA']
 
-data.loc[:,factors] = data.groupby('ticker',group_keys=False)[factors].apply(lambda x: x.fillna(x.mean()))
+data.loc[:,factors] = data.groupby('Ticker',group_keys=False)[factors].apply(lambda x: x.fillna(x.mean()))
+
+data = data.drop('Adj Close',axis=1)
 
 print(data)
 
-print(data)
+data = data.dropna(axis=1)
 
-data = data.drop('cluster',axis=1)
+print(data)
+print(df.info())
 
 def Get_Cluster(df):
-    df['cluster'] = k_means(n_clusters=4,random_state=0,init='random').fit(df).labels__
+
+    df['cluster'] = KMeans(n_clusters=4,random_state=0,init='random').fit(df).labels_
+
     return df
 
-data = data.dropna().groupby('date',group_keys=False)
+print(df.info())
+data = data.dropna(axis=1).groupby('Date',group_keys=False).apply(Get_Cluster)
 
 print(data)
